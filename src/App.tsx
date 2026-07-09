@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import type { Client, Status } from './types'
 import { STATUSES } from './types'
 import {
   addClient,
+  deleteClient,
   listClients,
   notifyNewClient,
   updateStatus,
@@ -36,6 +37,15 @@ export default function App() {
   const [status, setStatus] = useState<Status>('Новый')
   const [saving, setSaving] = useState(false)
 
+  const [toast, setToast] = useState<{ text: string; kind: 'info' | 'success' } | null>(null)
+  const toastTimer = useRef<number | undefined>(undefined)
+
+  function showToast(text: string, kind: 'info' | 'success') {
+    setToast({ text, kind })
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(null), 4000)
+  }
+
   async function refresh() {
     try {
       setClients(await listClients())
@@ -49,6 +59,7 @@ export default function App() {
 
   useEffect(() => {
     refresh()
+    return () => window.clearTimeout(toastTimer.current)
   }, [])
 
   const counts = useMemo(() => {
@@ -64,15 +75,35 @@ export default function App() {
     try {
       const created = await addClient({ name: name.trim(), phone: phone.trim(), status })
       setClients((prev) => [created, ...prev])
-      notifyNewClient({ name: created.name, phone: created.phone, status: created.status })
       setName('')
       setPhone('')
       setStatus('Новый')
       setError(null)
+      showToast('Клиент добавлен', 'info')
+      const sent = await notifyNewClient({
+        name: created.name,
+        phone: created.phone,
+        status: created.status,
+      })
+      if (sent) {
+        showToast('✓ Клиент добавлен · уведомление отправлено юристу в Telegram', 'success')
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Не удалось добавить клиента')
     } finally {
       setSaving(false)
+    }
+  }
+
+  async function onDelete(id: string) {
+    if (!window.confirm('Удалить клиента?')) return
+    const snapshot = clients
+    setClients((cs) => cs.filter((c) => c.id !== id))
+    try {
+      await deleteClient(id)
+    } catch (e) {
+      setClients(snapshot)
+      setError(e instanceof Error ? e.message : 'Не удалось удалить клиента')
     }
   }
 
@@ -154,6 +185,7 @@ export default function App() {
                   <th>Телефон</th>
                   <th>Статус</th>
                   <th>Добавлен</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -180,6 +212,16 @@ export default function App() {
                     <td className="muted">
                       {new Date(c.created_at).toLocaleDateString('ru-RU')}
                     </td>
+                    <td className="col-action">
+                      <button
+                        type="button"
+                        className="btn-del"
+                        onClick={() => onDelete(c.id)}
+                        title="Удалить клиента"
+                      >
+                        Удалить
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -191,6 +233,8 @@ export default function App() {
       <footer className="footer muted">
         Прототип для «Доступное Право» · статусы: Новый -&gt; В работе -&gt; Закрыт
       </footer>
+
+      {toast && <div className={`toast ${toast.kind}`}>{toast.text}</div>}
     </div>
   )
 }

@@ -64,19 +64,31 @@ export async function updateStatus(id: string, status: Status): Promise<void> {
   lsWrite(lsRead().map((c) => (c.id === id ? { ...c, status } : c)))
 }
 
-// Best-effort: уведомление в Telegram через serverless-функцию. Ошибки не ломают UI.
+export async function deleteClient(id: string): Promise<void> {
+  if (supabase) {
+    const { error } = await supabase.from('clients').delete().eq('id', id)
+    if (error) throw error
+    return
+  }
+  lsWrite(lsRead().filter((c) => c.id !== id))
+}
+
+// Уведомление в Telegram через serverless-функцию. Возвращает true, если сообщение
+// действительно отправлено. Ошибки не ломают основной сценарий.
 export async function notifyNewClient(client: {
   name: string
   phone: string
   status: string
-}): Promise<void> {
+}): Promise<boolean> {
   try {
-    await fetch('/api/notify', {
+    const r = await fetch('/api/notify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(client),
     })
+    const data = (await r.json().catch(() => ({}))) as { ok?: boolean }
+    return Boolean(data.ok)
   } catch {
-    /* уведомление не критично для основного сценария */
+    return false
   }
 }
